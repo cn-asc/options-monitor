@@ -1,0 +1,32 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore
+
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+*.log
+*.err
+preview.html
+*.json
+!token.json
+iv_history.json
+price_history.json
+shares_outstanding.json
+.cron_lock
+logs/
+*.xlsx
+*.csv
+!us_ranked_headlines.csv

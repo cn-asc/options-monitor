@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ subject_prefix }} — {{ as_of }}</title>
+
+  <style>
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      color: #111;
+      background: #f9f9f9;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h2 {
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    th, td {
+      text-align: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 13px;
+      vertical-align: middle;
+    }
+
+    th {
+      background: #fafafa;
+      font-weight: 600;
+    }
+
+    tr:hover {
+      background: #f6f8fa;
+    }
+
+    /* --- 8-bin diverging IV/RV ratio heatmap --- */
+
+    .ratio-bin-1 { background-color: #2166ac; color:#fff; }
+    .ratio-bin-2 { background-color: #4393c3; color:#fff; }
+    .ratio-bin-3 { background-color: #92c5de; color:#111; }
+    .ratio-bin-4 { background-color: #d1e5f0; color:#111; }
+
+    .ratio-bin-5 { background-color: #fddbc7; color:#111; }
+    .ratio-bin-6 { background-color: #f4a582; color:#111; }
+    .ratio-bin-7 { background-color: #d6604d; color:#fff; }
+    .ratio-bin-8 { background-color: #b2182b; color:#fff; }
+
+    .subtext {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .trade-options-btn {
+      display: inline-block;
+      padding: 6px 14px;
+      background: #c00;
+      color: #fff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .trade-options-btn:hover {
+      background: #a00;
+    }
+  </style>
+</head>
+
+<body>
+  {% if banner_data_url %}
+  <div style="margin-bottom:16px;">
+    <img src="{{ banner_data_url }}" alt="Ascend" style="max-width:100%; height:auto; display:block;" />
+  </div>
+  {% endif %}
+  {% if logo_data_url %}
+  <div style="margin-bottom:12px;">
+    <img src="{{ logo_data_url }}" alt="Ascend Logo" style="max-height:48px; height:auto;" />
+  </div>
+  {% endif %}
+  <h2>{{ subject_prefix }} — {{ as_of }}</h2>
+
+  {% set p = pct %}
+  {% set neg_iv   = "-" ~ p ~ "% IV" %}
+  {% set pos_iv   = "+" ~ p ~ "% IV" %}
+  {% set neg_rv30 = "-" ~ p ~ "% 30D Ratio" %}
+  {% set pos_rv30 = "+" ~ p ~ "% 30D Ratio" %}
+  {% set neg_ltm  = "-" ~ p ~ "% LTM Ratio" %}
+  {% set pos_ltm  = "+" ~ p ~ "% LTM Ratio" %}
+
+  <!-- Build the *_cls keys -->
+  {% set neg_rv30_cls = neg_rv30 ~ "_cls" %}
+  {% set pos_rv30_cls = pos_rv30 ~ "_cls" %}
+  {% set neg_ltm_cls  = neg_ltm  ~ "_cls" %}
+  {% set pos_ltm_cls  = pos_ltm  ~ "_cls" %}
+
+  <table>
+    <thead>
+      <tr>
+        <th>Ticker</th>
+        <th>Last Px</th>
+        <th>1D %</th>
+        <th>7D %</th>
+        <th>30D RV</th>
+        <th>LTM RV</th>
+
+        <th>-{{ pct }}% IV</th>
+        <th>-{{ pct }}% 30D Ratio</th>
+        <th>-{{ pct }}% LTM Ratio</th>
+
+        <th>+{{ pct }}% IV</th>
+        <th>+{{ pct }}% 30D Ratio</th>
+        <th>+{{ pct }}% LTM Ratio</th>
+
+        <th>Expiry Date</th>
+        {% if show_trade_buttons %}
+        <th>Trade Options</th>
+        {% endif %}
+      </tr>
+    </thead>
+
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><b>{{ r["Ticker"] }}</b></td>
+        <td>{{ r["Last Px"] }}</td>
+        <td>{{ r["1D %"] }}</td>
+        <td>{{ r["7D %"] }}</td>
+
+        <td>{{ r["30D RV"] }}</td>
+        <td>{{ r["LTM RV"] }}</td>
+
+        <td>{{ r[neg_iv] }}</td>
+
+        <!-- -X% 30D -->
+        <td class="{{ r[neg_rv30_cls] }}">{{ r[neg_rv30] }}</td>
+
+        <!-- -X% LTM -->
+        <td class="{{ r[neg_ltm_cls] }}">{{ r[neg_ltm] }}</td>
+
+        <td>{{ r[pos_iv] }}</td>
+
+        <!-- +X% 30D -->
+        <td class="{{ r[pos_rv30_cls] }}">{{ r[pos_rv30] }}</td>
+
+        <!-- +X% LTM -->
+        <td class="{{ r[pos_ltm_cls] }}">{{ r[pos_ltm] }}</td>
+
+        <td>{{ r["Expiry Date"] or "–" }}</td>
+        {% if show_trade_buttons %}
+        <td><a href="/create-drafts/{{ r['Ticker'] }}" class="trade-options-btn">Trade Options</a></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="subtext" style="margin-top:15px;">
+    Source: Polygon.io. Designed for Ascend Interplay.
+  </p>
+
+  {% set has_alternative = rows | selectattr("_used_alternative_contract") | list | length > 0 %}
+  {% if has_alternative %}
+  <p class="subtext" style="margin-top:10px; font-style: italic;">
+    * IV values marked with an asterisk indicate that the selected contract at the target moneyness had no IV data available from the API. 
+    In these cases, we used a nearby contract within ±5% of the target strike that had IV data available.
+  </p>
+  {% endif %}
+
+</body>
+</html>

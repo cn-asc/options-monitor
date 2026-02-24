@@ -1,0 +1,2 @@
+run = "python monitor_app.py"
+language = "python3"

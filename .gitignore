@@ -1,0 +1,55 @@
+# Environment files with secrets (do not commit)
+.env
+env.yaml
+OptionsMonitor.env
+*.env
+!*.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+
+# Logs
+*.log
+*.err
+logs/
+
+# Data files and secrets
+*.json
+!trade_config.json.example
+token.json
+trade_config.json
+iv_history.json
+price_history.json
+shares_outstanding.json
+
+# Output files
+preview.html
+*.xlsx
+*.csv
+!us_ranked_headlines.csv
+
+# Lock files
+.cron_lock
+
+# OS and local
+.DS_Store
+
+# Run artifacts
+last_run.out
+log.txt

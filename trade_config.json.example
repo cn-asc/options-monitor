@@ -1,0 +1,8 @@
+{
+  "clients": [
+    { "email": "client1@example.com", "name": "Client One" },
+    { "email": "client2@example.com", "name": "Client Two" }
+  ],
+  "subject_template": "Trade idea: {ticker}",
+  "body_template": "Hi {client_name},\n\nOptions trade idea for {ticker}.\n\n[Your body text here. Use {ticker} and {client_name} as placeholders.]\n\nBest,\nYour name"
+}
