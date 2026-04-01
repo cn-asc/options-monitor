@@ -75,6 +75,11 @@
     .trade-options-btn:hover {
       background: #a00;
     }
+
+    /* Thick black separator between sections (indices | names | commodities) */
+    tr.section-sep td {
+      border-top: 3px solid #000;
+    }
   </style>
 </head>
 
@@ -132,7 +137,7 @@
 
     <tbody>
       {% for r in rows %}
-      <tr>
+      <tr{% if r["Ticker"] in ["AAPL", "GLD"] %} class="section-sep"{% endif %}>
         <td><b>{{ r["Ticker"] }}</b></td>
         <td>{{ r["Last Px"] }}</td>
         <td>{{ r["1D %"] }}</td>

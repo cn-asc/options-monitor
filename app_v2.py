@@ -230,22 +230,19 @@ def main():
             r["Headline"] = None
             r["Headline URL"] = None
 
-    # Sort so more red (higher IV/RV ratio) floats to top, blue (lower ratio) to bottom
-    _pct = int(float(os.getenv("MONEYNESS_PCT", "0.15")) * 100)
-    _r30_neg = f"-{_pct}% 30D Ratio"
-    _r30_pos = f"+{_pct}% 30D Ratio"
-    _rltm_neg = f"-{_pct}% LTM Ratio"
-    _rltm_pos = f"+{_pct}% LTM Ratio"
+    # Sort: indices (SPY, QQQ) first, then alphabetical, then gold/silver/copper at bottom
+    TICKER_DISPLAY_ORDER = [
+        "SPY", "QQQ", "AAPL", "ADBE", "AMZN", "APP", "BRK.B", "COIN", "CRCL", "DPZ",
+        "FICO", "FTNT", "GOOG", "HOOD", "IBIT", "IBM", "KLAC", "LRCX", "META", "MSCI",
+        "MSFT", "MSTR", "NVDA", "GLD", "GDX", "SLV", "SIL", "CPER", "COPX",
+    ]
+    _order_map = {t: i for i, t in enumerate(TICKER_DISPLAY_ORDER)}
 
-    def _ratio_sort_key(r):
-        vals = [
-            r.get(_r30_neg), r.get(_r30_pos),
-            r.get(_rltm_neg), r.get(_rltm_pos),
-        ]
-        nums = [float(v) for v in vals if v is not None]
-        return -max(nums) if nums else 0  # higher ratio first (red on top)
+    def _display_sort_key(r):
+        t = str(r.get("Ticker", "")).upper().strip()
+        return (_order_map.get(t, 9999), t)  # unknown tickers at end, then alpha
 
-    rows = sorted(rows, key=_ratio_sort_key)
+    rows = sorted(rows, key=_display_sort_key)
 
     # 4) Banner/logo from assets folder as data URLs for email
     import base64

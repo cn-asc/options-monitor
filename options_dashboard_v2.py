@@ -638,47 +638,50 @@ def get_iv_from_snapshot(underlying_ticker: str, option_contract_ticker: str) ->
     Returns:
         IV as a percentage (e.g., 25.5 for 25.5%), or None if unavailable.
     
-    Note: IV is at the top level of results, not inside greeks. The API returns IV as a percentage
-    (e.g., 5.69 for 5.69%), not as a decimal.
+    Polygon returns implied_volatility as a decimal (e.g. 0.3049 = 30.49%). We normalize:
+    - If raw value in (0, 1.5] → treat as decimal, multiply by 100.
+    - If raw value in (1.5, 150) → treat as already percent (API inconsistency), use as-is.
+    - Otherwise reject and log (avoids showing 3000% or 0.01% from wrong field/units).
     """
+    debug_iv = os.getenv("DEBUG_IV", "0") == "1"
     url = f"{BASE_URL}/v3/snapshot/options/{underlying_ticker}/{option_contract_ticker}"
     
     try:
         data = get_json(url)
+        if debug_iv:
+            print(f"[DEBUG_IV] Snapshot response for {option_contract_ticker}: {json.dumps(data, indent=2)[:1500]}", file=sys.stderr)
         results = data.get("results")
-        if not results:
+        # API may return results as object or as single-element list
+        if isinstance(results, list):
+            results = results[0] if results else None
+        if not results or not isinstance(results, dict):
             return None
         
-        # IV is at the top level of results (not inside greeks!)
+        # IV is at the top level of results (not inside greeks - greeks has delta/gamma/theta/vega only)
         iv = results.get("implied_volatility")
         if iv is None:
-            # Fallback: check inside greeks (though API docs show it's at top level)
+            # Fallback: check inside greeks (some docs suggest it can appear there)
             greeks = results.get("greeks")
-            if greeks and isinstance(greeks, dict) and len(greeks) > 0:
+            if greeks and isinstance(greeks, dict):
                 iv = greeks.get("implied_volatility")
         
         if iv is None:
             return None
         
         iv_raw = float(iv)
-        
-        # DEBUG: Log raw IV value to diagnose conversion issue
-        # Bloomberg shows BRK.B ~17-25%, META ~30-44%, but we're getting 94.99% and 101.7%
-        # This suggests we might be double-converting or API format is different
-        print(f"    DEBUG IV: {underlying_ticker} {option_contract_ticker}: raw_iv={iv_raw}", file=sys.stderr)
-        
-        # Check if IV is already a percentage (> 1.0) or a decimal (< 1.0)
-        # If raw IV is > 1.0, it's likely already a percentage (e.g., 17.57 = 17.57%)
-        # If raw IV is < 1.0, it's a decimal (e.g., 0.1757 = 17.57%)
-        if iv_raw > 1.0:
-            # Already a percentage, return as-is
-            print(f"    DEBUG IV: Treating as percentage (already > 1.0), returning {iv_raw:.2f}%", file=sys.stderr)
-            return round(iv_raw, 2)
-        else:
-            # Decimal format, convert to percentage
+        # Normalize: Polygon docs say decimal (0.30 = 30%); some responses may be percent already
+        if 0 < iv_raw <= 1.5:
             iv_percent = round(iv_raw * 100, 2)
-            print(f"    DEBUG IV: Treating as decimal, converting {iv_raw} -> {iv_percent}%", file=sys.stderr)
-            return iv_percent
+        elif 1.5 < iv_raw < 150:
+            iv_percent = round(iv_raw, 2)
+            if debug_iv:
+                print(f"[DEBUG_IV] Treated IV as already percent: raw={iv_raw} -> {iv_percent}%", file=sys.stderr)
+        else:
+            print(f"    ⚠️ IV out of range for {underlying_ticker} {option_contract_ticker}: raw={iv_raw} (rejecting)", file=sys.stderr)
+            return None
+        if iv_percent > 100:
+            print(f"    ⚠️ Unusually high IV for {underlying_ticker} {option_contract_ticker}: {iv_percent}%", file=sys.stderr)
+        return iv_percent
         
     except Exception as e:
         # API-only: Log error if API fails - this indicates a problem with the API/service

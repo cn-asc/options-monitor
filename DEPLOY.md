@@ -32,11 +32,13 @@ gcloud services enable cloudfunctions.googleapis.com --project=$PROJECT
 gcloud services enable cloudscheduler.googleapis.com --project=$PROJECT
 ```
 
-## Step 2: Update env.yaml
+## Step 2: env.yaml is built from .env when you deploy
 
-Edit `env.yaml` and update any values you need to change. The file already contains all necessary environment variables including the Gmail token.
+**When you run `./quick_deploy.sh`, the script runs `build_env_yaml.py`, which builds `env.yaml` from your `.env`.** So you only maintain `.env`; the deploy step creates `env.yaml` for the Cloud Function.
 
-**Note:** The `GMAIL_TOKEN_JSON` in `env.yaml` contains your OAuth token. If it expires, you'll need to regenerate it using `gmail_auth.py` and update the value in `env.yaml`.
+- **First-time only:** If you don’t have `GMAIL_TOKEN_JSON` in `.env`, create `env.yaml` once (e.g. copy from `env.yaml.example`) and add `GMAIL_TOKEN_JSON`. On later deploys, `build_env_yaml.py` will keep that value from the existing `env.yaml` when merging.
+- Set `PREVIEW_ONLY=0` in `.env` so the scheduled job sends email (use `1` only for local preview).
+- The `GMAIL_TOKEN_JSON` in `env.yaml` (or `.env`) is your OAuth token. If it expires, regenerate with `gmail_auth.py` and update `.env` or `env.yaml`.
 
 ## Step 3: Deploy Cloud Function
 
@@ -114,9 +116,26 @@ gcloud functions logs read options-dashboard-v2 \
 3. **Gmail auth**: If `token.json` expires, regenerate it using `gmail_auth.py` and update `GMAIL_TOKEN_JSON` in `env.yaml`
 4. **Environment variables**: Check `env.yaml` has all required values
 
-## Updating the Function
+## Saving your changes to the Cloud Run job
 
-To update the code:
+**Code and template changes** (metrics, sort order, thick lines, new tickers in the app) are deployed only when you run a deploy. **Environment variables** (including `TICKERS`) come only from `env.yaml`, not from `.env`.
+
+To ensure today’s run uses the latest code and ticker list:
+
+1. **Update `env.yaml`**  
+   - Set `TICKERS` to the same list as in `.env` (see `env.yaml.example` for the current list).  
+   - Set `PREVIEW_ONLY: "0"` so the scheduled job sends email.
+
+2. **Deploy from the repo that has your latest code**  
+   ```bash
+   gcloud config set project investmentprocessor
+   ./quick_deploy.sh
+   ```  
+   This uploads the current directory (all Python and HTML) and the current `env.yaml`. The next scheduled run (and any manual run) will use this code and config.
+
+## Updating the Function (manual)
+
+To update only the code/config without the full script:
 
 ```bash
 gcloud functions deploy options-dashboard-v2 \
@@ -124,7 +143,8 @@ gcloud functions deploy options-dashboard-v2 \
     --runtime=python311 \
     --region=us-east1 \
     --source=. \
-    # ... (same flags as initial deployment)
+    --env-vars-file=env.yaml \
+    # ... (same flags as in quick_deploy.sh)
 ```
 
 ## Cost Estimate

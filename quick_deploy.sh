@@ -43,8 +43,33 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project="${PROJ
     --quiet || true
 fi
 
-# Deploy function (using authenticated access due to org policy)
-echo "📦 Deploying Cloud Function..."
+# Build env.yaml from .env so you only maintain .env (single source of truth)
+if [[ -f .env ]]; then
+  echo "📋 Building env.yaml from .env..."
+  python3 build_env_yaml.py || { echo "❌ build_env_yaml.py failed."; exit 1; }
+fi
+if [[ ! -f env.yaml ]]; then
+  echo "❌ env.yaml not found. Run: python3 build_env_yaml.py (requires .env)."
+  echo "   If you have no .env, copy env.yaml.example to env.yaml and add GMAIL_TOKEN_JSON, POLYGON_API_KEY, TICKERS, SEND_FROM, SEND_TO. See DEPLOY.md."
+  exit 1
+fi
+
+# Most common reason for "no email this morning": preview mode deployed to Cloud
+if [[ -f .env ]] && grep -qE '^PREVIEW_ONLY[[:space:]]*=[[:space:]]*1([[:space:]]|$)' .env; then
+  echo ""
+  echo "❌ .env has PREVIEW_ONLY=1 — the scheduled job will NOT send email (only writes preview)."
+  echo "   Set PREVIEW_ONLY=0 in .env, then run ./quick_deploy.sh again."
+  echo "   To deploy anyway: PREVIEW_ONLY_ALLOW_DEPLOY=1 ./quick_deploy.sh"
+  echo ""
+  [[ "${PREVIEW_ONLY_ALLOW_DEPLOY:-}" == "1" ]] || exit 1
+fi
+
+if ! grep -q '^GMAIL_TOKEN_JSON:' env.yaml 2>/dev/null; then
+  echo "❌ env.yaml has no GMAIL_TOKEN_JSON. Add it to .env (one line) or create env.yaml with GMAIL_TOKEN_JSON once, then run deploy again. See DEPLOY.md."
+  exit 1
+fi
+
+echo "📦 Deploying Cloud Function (source=. and env.yaml)..."
 gcloud functions deploy $FUNCTION_NAME \
     --gen2 \
     --runtime=python311 \
