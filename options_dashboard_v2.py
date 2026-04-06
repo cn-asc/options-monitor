@@ -397,35 +397,68 @@ def pick_contract_at_moneyness(
         desired_type = "call"
 
     url = f"{BASE_URL}/v3/reference/options/contracts"
-    params = {"underlying_ticker": ticker, "limit": 1000}
 
-    # Fetch all contracts using pagination to get more expiry dates
-    all_contracts = []
-    next_url = None
-    max_pages = 5  # Limit to 5 pages to avoid excessive API calls
-    
-    for page in range(max_pages):
-        if next_url:
-            # Use the next_url from previous response, but add API key
-            # next_url is a full URL, so we need to add the apiKey parameter
-            data = get_json(next_url, {"apiKey": POLYGON_API_KEY})
-        else:
-            data = get_json(url, params)
-        
+    # Build a list of expiry dates to query: target first, then fallback candidates
+    # We query by specific expiry to avoid paginating through thousands of near-term contracts
+    today = dt.datetime.now(dt.UTC)
+
+    def _monthly_expiries_near(anchor: dt.datetime, count: int = 6) -> List[dt.datetime]:
+        """Return up to `count` third-Friday monthly expiries on or after anchor."""
+        results = []
+        year, month = anchor.year, anchor.month
+        for _ in range(count * 2):
+            # Find third Friday of (year, month)
+            first_day = dt.datetime(year, month, 1, tzinfo=dt.UTC)
+            first_friday = first_day + dt.timedelta(days=(4 - first_day.weekday()) % 7)
+            third_friday = first_friday + dt.timedelta(weeks=2)
+            if third_friday >= anchor:
+                results.append(third_friday)
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+            if len(results) >= count:
+                break
+        return results
+
+    # Candidate expiry dates to try, in priority order
+    candidate_expiries: List[Optional[dt.datetime]] = []
+    if target_expiry:
+        candidate_expiries.append(target_expiry)
+        # Add nearby monthly expiries as fallbacks
+        candidate_expiries.extend(_monthly_expiries_near(today))
+    else:
+        # No target: try monthly expiries starting ~30 DTE out
+        candidate_expiries.extend(_monthly_expiries_near(today + dt.timedelta(days=25)))
+
+    contracts = []
+    used_expiry: Optional[dt.datetime] = None
+    for cand_expiry in candidate_expiries:
+        expiry_str = cand_expiry.strftime("%Y-%m-%d")
+        params = {
+            "underlying_ticker": ticker,
+            "expiration_date": expiry_str,
+            "contract_type": desired_type,
+            "limit": 250,
+        }
+        data = get_json(url, params)
         page_contracts = data.get("results") or []
-        all_contracts.extend(page_contracts)
-        
-        # Check for pagination
-        next_url = data.get("next_url")
-        if not next_url:
-            break  # No more pages
-    
-    contracts = all_contracts
+        if page_contracts:
+            contracts = page_contracts
+            used_expiry = cand_expiry
+            if target_expiry and cand_expiry.date() != target_expiry.date():
+                best_dte = (cand_expiry - today).days
+                print(
+                    f"⚠️ No contracts found for {ticker} matching target expiry "
+                    f"{target_expiry.date()}, using closest monthly expiry "
+                    f"{expiry_str} (DTE: {best_dte})",
+                    file=sys.stderr,
+                )
+            break
+
     if not contracts:
         return None
 
-    today = dt.datetime.now(dt.UTC)
-
+    # Enrich contracts with computed fields
     def enrich(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         strike = c.get("strike_price")
         expiry_str = c.get("expiration_date")
@@ -447,103 +480,20 @@ def pick_contract_at_moneyness(
         c["_expiry"] = expiry
         c["_dte"] = dte
         c["_type"] = c.get("contract_type", "").lower()
+        # All contracts fetched via expiry-filtered query are treated as matching
+        c["_matches_target"] = True
+        c["_is_monthly"] = used_expiry is not None and (
+            used_expiry.weekday() == 4 and 15 <= used_expiry.day <= 21
+        )
+        c["_is_quarterly"] = c["_is_monthly"] and (
+            used_expiry is not None and used_expiry.month in [3, 6, 9, 12]
+        )
         return c
 
-    def is_monthly_expiry(expiry_date: dt.datetime) -> bool:
-        """
-        Check if an expiry date is a monthly expiry (third Friday of the month).
-        Monthly options typically expire on the third Friday of each month.
-        """
-        # Get the day of week (Monday=0, Friday=4)
-        weekday = expiry_date.weekday()
-        
-        # Must be a Friday
-        if weekday != 4:
-            return False
-        
-        # Check if it's the third Friday (day of month between 15-21)
-        day_of_month = expiry_date.day
-        if 15 <= day_of_month <= 21:
-            return True
-        
-        return False
-    
-    def is_quarterly_expiry(expiry_date: dt.datetime) -> bool:
-        """
-        Check if an expiry date is a quarterly expiry.
-        Quarterly options typically expire on the third Friday of March, June, September, December.
-        """
-        if not is_monthly_expiry(expiry_date):
-            return False
-        
-        month = expiry_date.month
-        # Quarterly expiries are in March (3), June (6), September (9), December (12)
-        return month in [3, 6, 9, 12]
-
-    enriched: List[Dict[str, Any]] = []
-    for c in contracts:
-        ec = enrich(c)
-        if ec is not None:
-            expiry = ec["_expiry"]
-            ec["_is_monthly"] = is_monthly_expiry(expiry)
-            ec["_is_quarterly"] = is_quarterly_expiry(expiry)
-            
-            # If target_expiry is provided, mark if this contract matches it
-            if target_expiry:
-                # Compare dates (ignore time)
-                ec["_matches_target"] = expiry.date() == target_expiry.date()
-            else:
-                ec["_matches_target"] = False
-            
-            enriched.append(ec)
+    enriched: List[Dict[str, Any]] = [ec for c in contracts if (ec := enrich(c)) is not None]
 
     if not enriched:
         return None
-
-    # Filter to target expiry if specified
-    if target_expiry:
-        matching_expiry = [c for c in enriched if c.get("_matches_target", False)]
-        if matching_expiry:
-            enriched = matching_expiry
-        else:
-            # No contracts match target expiry - try to find closest monthly expiry
-            # First, find all monthly expiries
-            monthly_expiries = [c for c in enriched if c.get("_is_monthly", False)]
-            if monthly_expiries:
-                # Find the monthly expiry closest to target_expiry
-                # If two dates are equally distant, prefer the later one (closer to 90 DTE target)
-                target_date = target_expiry.date()
-                best_monthly = min(
-                    monthly_expiries,
-                    key=lambda c: (
-                        abs((c["_expiry"].date() - target_date).days),  # Primary: distance from target
-                        -c["_expiry"].date().toordinal()  # Secondary: prefer later dates (negative for min)
-                    )
-                )
-                best_dte = best_monthly["_dte"]
-                best_date = best_monthly["_expiry"].date()
-                
-                # Use if it's reasonably close (within 30 days) and has reasonable DTE (45-120)
-                # 45 DTE is acceptable as it's still ~1.5 months out
-                if abs((best_date - target_date).days) <= 30 and 45 <= best_dte <= 120:
-                    print(f"⚠️ No contracts found for {ticker} matching target expiry {target_expiry.date()}, using closest monthly expiry {best_date} (DTE: {best_dte})", file=sys.stderr)
-                    # Filter to contracts matching this best monthly expiry
-                    enriched = [c for c in monthly_expiries if c["_expiry"].date() == best_date]
-                    # Mark contracts matching this best monthly expiry
-                    for c in enriched:
-                        c["_matches_target"] = True
-                else:
-                    # Fall back to any expiry, but prefer longer DTE
-                    print(f"⚠️ No contracts found for {ticker} matching target expiry {target_expiry.date()}, using closest available (best monthly was {best_date}, DTE: {best_dte})", file=sys.stderr)
-                    # Reset _matches_target flag for fallback
-                    for c in enriched:
-                        c["_matches_target"] = False
-            else:
-                # No monthly expiries at all - fall back to any expiry
-                print(f"⚠️ No contracts found for {ticker} matching target expiry {target_expiry.date()}, using closest available", file=sys.stderr)
-                # Reset _matches_target flag for fallback
-                for c in enriched:
-                    c["_matches_target"] = False
 
     # scoring: minimize strike distance (in percent)
     # If target_expiry is set, all contracts should match it, so we only score by strike distance
